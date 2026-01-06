@@ -31,8 +31,9 @@ type Stats = {
   projectedTotal: number
 }
 
-export default function JobDetailPage({ params }: { params: { id: string } }) {
+export default function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter()
+  const [jobId, setJobId] = useState<string>("")
   const [job, setJob] = useState<Job | null>(null)
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
@@ -45,12 +46,18 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    fetchJob()
-  }, [params.id])
+    params.then(p => setJobId(p.id))
+  }, [params])
+
+  useEffect(() => {
+    if (jobId) {
+      fetchJob()
+    }
+  }, [jobId])
 
   const fetchJob = async () => {
     try {
-      const res = await fetch(`/api/jobs/${params.id}`)
+      const res = await fetch(`/api/jobs/${jobId}`)
       if (!res.ok) throw new Error("Failed to fetch job")
       const data = await res.json()
       setJob(data.job)
@@ -68,7 +75,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
     setError("")
 
     try {
-      const res = await fetch(`/api/jobs/${params.id}/updates`, {
+      const res = await fetch(`/api/jobs/${jobId}/updates`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
