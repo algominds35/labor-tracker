@@ -1,44 +1,44 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { calculateStats } from "@/lib/calculations"
 
-export async function PATCH(
+export async function GET(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
     const session = await auth()
-    const { id } = await params
     
-    if (!session?.user?.id) {
+    if (!session?.user?.email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const { status } = await request.json()
-
-    if (!status || !["active", "archived"].includes(status)) {
-      return NextResponse.json(
-        { error: "Invalid status" },
-        { status: 400 }
-      )
+    const jobId = parseInt(params.id)
+    
+    if (isNaN(jobId)) {
+      return NextResponse.json({ error: "Invalid job ID" }, { status: 400 })
     }
 
     const job = await prisma.job.findUnique({
-      where: { id: parseInt(id) },
+      where: { id: jobId },
+      include: {
+        updates: {
+          orderBy: { createdAt: "asc" },
+        },
+      },
     })
 
-    if (!job || job.userId !== session.user.id) {
+    if (!job) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 })
     }
 
-    const updated = await prisma.job.update({
-      where: { id: parseInt(id) },
-      data: { status },
-    })
+    // Calculate current stats
+    const stats = calculateStats(job, job.updates)
 
-    return NextResponse.json(updated)
+    return NextResponse.json({ job, stats })
   } catch (error) {
-    console.error("Job update error:", error)
+    console.error("Job fetch error:", error)
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

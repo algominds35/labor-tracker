@@ -1,176 +1,295 @@
-import { auth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
-import { redirect, notFound } from "next/navigation"
-import Link from "next/link"
-import { calculateVariance } from "@/lib/calculations"
-import UpdateForm from "./UpdateForm"
-import JobActions from "./JobActions"
-import SendTestEmail from "./SendTestEmail"
+"use client"
 
-export default async function JobDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>
-}) {
-  const { id } = await params
-  const session = await auth()
-  
-  if (!session?.user) {
-    redirect("/login")
-  }
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 
-  const job = await prisma.job.findUnique({
-    where: { id: parseInt(id) },
-    include: {
-      updates: {
-        orderBy: { createdAt: "desc" },
-      },
-    },
+type Job = {
+  id: number
+  name: string
+  estimatedHours: number
+  expectedWeeks: number
+  status: string
+  createdAt: string
+  updates: WeeklyUpdate[]
+}
+
+type WeeklyUpdate = {
+  id: number
+  actualHours: number
+  percentComplete: number
+  createdAt: string
+}
+
+type Stats = {
+  currentWeek: number
+  totalHours: number
+  percentComplete: number
+  plannedUsage: number
+  laborVariance: number
+  variancePercent: number
+  status: string
+  projectedTotal: number
+}
+
+export default function JobDetailPage({ params }: { params: { id: string } }) {
+  const router = useRouter()
+  const [job, setJob] = useState<Job | null>(null)
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [showUpdateForm, setShowUpdateForm] = useState(false)
+  const [formData, setFormData] = useState({
+    actualHours: "",
+    percentComplete: "",
   })
+  const [submitting, setSubmitting] = useState(false)
 
-  if (!job || job.userId !== session.user.id) {
-    notFound()
+  useEffect(() => {
+    fetchJob()
+  }, [params.id])
+
+  const fetchJob = async () => {
+    try {
+      const res = await fetch(`/api/jobs/${params.id}`)
+      if (!res.ok) throw new Error("Failed to fetch job")
+      const data = await res.json()
+      setJob(data.job)
+      setStats(data.stats)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load job")
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const latestUpdate = job.updates[0]
-  let variance = null
+  const handleSubmitUpdate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmitting(true)
+    setError("")
 
-  if (latestUpdate) {
-    variance = calculateVariance(
-      job.estimatedHours,
-      latestUpdate.actualHours,
-      latestUpdate.percentComplete
+    try {
+      const res = await fetch(`/api/jobs/${params.id}/updates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          actualHours: parseFloat(formData.actualHours),
+          percentComplete: parseFloat(formData.percentComplete),
+        }),
+      })
+
+      if (!res.ok) throw new Error("Failed to create update")
+
+      setFormData({ actualHours: "", percentComplete: "" })
+      setShowUpdateForm(false)
+      fetchJob() // Refresh data
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create update")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "green":
+        return "bg-green-100 text-green-800 border-green-300"
+      case "yellow":
+        return "bg-yellow-100 text-yellow-800 border-yellow-300"
+      case "red":
+        return "bg-red-100 text-red-800 border-red-300"
+      default:
+        return "bg-gray-100 text-gray-800 border-gray-300"
+    }
+  }
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case "green":
+        return "✓ On Track"
+      case "yellow":
+        return "⚠ Watch"
+      case "red":
+        return "⚠️ Action Needed"
+      default:
+        return "Unknown"
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-4xl mx-auto">
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !job) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-red-50 border border-red-200 rounded p-4 mb-4">
+            <p className="text-red-800">{error || "Job not found"}</p>
+          </div>
+          <button
+            onClick={() => router.push("/")}
+            className="text-blue-600 hover:underline"
+          >
+            ← Back to Jobs
+          </button>
+        </div>
+      </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center">
-            <Link href="/" className="text-xl font-bold">
-              Labor Tracker
-            </Link>
-          </div>
-        </div>
-      </nav>
-
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex justify-between items-start mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">{job.name}</h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Status: {job.status === "active" ? "Active" : "Archived"}
-            </p>
-          </div>
-          <JobActions jobId={job.id} currentStatus={job.status} />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="text-sm text-gray-600">Estimated Hours</div>
-            <div className="text-2xl font-bold text-gray-900 mt-1">
-              {job.estimatedHours}
-            </div>
-          </div>
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="text-sm text-gray-600">Expected Duration</div>
-            <div className="text-2xl font-bold text-gray-900 mt-1">
-              {job.expectedWeeks} weeks
-            </div>
-          </div>
-          {latestUpdate && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="text-sm text-gray-600">Progress</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">
-                {latestUpdate.percentComplete}%
-              </div>
-            </div>
-          )}
-        </div>
-
-        {variance && (
-          <div
-            className={`rounded-lg shadow p-6 mb-8 ${
-              variance.status === "GREEN"
-                ? "bg-green-50 border border-green-200"
-                : variance.status === "YELLOW"
-                ? "bg-yellow-50 border border-yellow-200"
-                : "bg-red-50 border border-red-200"
-            }`}
+    <div className="min-h-screen bg-gray-50 p-8">
+      <div className="max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="mb-6">
+          <button
+            onClick={() => router.push("/")}
+            className="text-blue-600 hover:underline mb-4"
           >
-            <div className="flex items-start justify-between">
-              <div>
-                <h2 className="text-lg font-semibold mb-2">
-                  Status: {variance.status}
-                </h2>
-                <p className="text-gray-700 mb-4">{variance.explanation}</p>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-gray-600">Planned Labor:</span>
-                    <span className="font-medium ml-2">
-                      {variance.plannedLabor.toFixed(1)} hrs
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Actual Labor:</span>
-                    <span className="font-medium ml-2">
-                      {latestUpdate.actualHours} hrs
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Variance:</span>
-                    <span className="font-medium ml-2">
-                      {variance.laborVariance.toFixed(1)} hrs ({variance.variancePercent.toFixed(1)}%)
-                    </span>
-                  </div>
-                  {variance.projectedOverrun !== null && (
-                    <div>
-                      <span className="text-gray-600">Projected Overrun:</span>
-                      <span className="font-medium ml-2">
-                        {variance.projectedOverrun.toFixed(1)} hrs
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <SendTestEmail jobId={job.id} />
-            </div>
-          </div>
-        )}
-
-        <div className="bg-white rounded-lg shadow p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">Weekly Update</h2>
-          <UpdateForm jobId={job.id} latestUpdate={latestUpdate} />
+            ← Back to Jobs
+          </button>
+          <h1 className="text-3xl font-bold text-gray-900">{job.name}</h1>
+          <p className="text-gray-600 mt-1">
+            {job.estimatedHours} hours estimated • {job.expectedWeeks} weeks expected
+          </p>
         </div>
 
-        {job.updates.length > 0 && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">Update History</h2>
-            <div className="space-y-3">
-              {job.updates.map((update) => (
-                <div
-                  key={update.id}
-                  className="border-l-4 border-gray-200 pl-4 py-2"
-                >
-                  <div className="flex justify-between text-sm">
-                    <div>
-                      <span className="font-medium">
-                        {update.actualHours} hrs actual
-                      </span>
-                      {" • "}
-                      <span>{update.percentComplete}% complete</span>
-                    </div>
-                    <div className="text-gray-500">
-                      {new Date(update.createdAt).toLocaleDateString()}
-                    </div>
-                  </div>
-                </div>
-              ))}
+        {/* Status Card */}
+        {stats && (
+          <div className={`border-2 rounded-lg p-6 mb-6 ${getStatusColor(stats.status)}`}>
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h2 className="text-2xl font-bold">{getStatusText(stats.status)}</h2>
+                <p className="text-sm mt-1">Week {stats.currentWeek} of {job.expectedWeeks}</p>
+              </div>
+              <div className="text-right">
+                <div className="text-3xl font-bold">{stats.percentComplete}%</div>
+                <div className="text-sm">Complete</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="font-semibold">Hours Used:</p>
+                <p>{stats.totalHours} / {job.estimatedHours}</p>
+              </div>
+              <div>
+                <p className="font-semibold">Variance:</p>
+                <p>{stats.laborVariance > 0 ? "+" : ""}{stats.laborVariance.toFixed(1)} hrs ({stats.variancePercent > 0 ? "+" : ""}{stats.variancePercent.toFixed(1)}%)</p>
+              </div>
+              <div>
+                <p className="font-semibold">Planned Usage:</p>
+                <p>{stats.plannedUsage.toFixed(1)} hrs</p>
+              </div>
+              <div>
+                <p className="font-semibold">Projected Total:</p>
+                <p>{stats.projectedTotal.toFixed(1)} hrs</p>
+              </div>
             </div>
           </div>
         )}
-      </main>
+
+        {/* Add Update Button */}
+        <div className="mb-6">
+          <button
+            onClick={() => setShowUpdateForm(!showUpdateForm)}
+            className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700"
+          >
+            {showUpdateForm ? "Cancel" : "+ Add Weekly Update"}
+          </button>
+        </div>
+
+        {/* Update Form */}
+        {showUpdateForm && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h3 className="text-xl font-bold mb-4">Weekly Update</h3>
+            <form onSubmit={handleSubmitUpdate} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Hours Used This Week
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  required
+                  value={formData.actualHours}
+                  onChange={(e) => setFormData({ ...formData, actualHours: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="e.g., 40"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Percent Complete (%)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="100"
+                  required
+                  value={formData.percentComplete}
+                  onChange={(e) => setFormData({ ...formData, percentComplete: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="e.g., 25"
+                />
+              </div>
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded p-3">
+                  <p className="text-red-800 text-sm">{error}</p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400"
+              >
+                {submitting ? "Saving..." : "Save Update"}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* Updates History */}
+        <div className="bg-white rounded-lg shadow">
+          <div className="p-6 border-b">
+            <h3 className="text-xl font-bold">Update History</h3>
+          </div>
+          <div className="p-6">
+            {job.updates.length === 0 ? (
+              <p className="text-gray-600">No updates yet. Add your first weekly update above.</p>
+            ) : (
+              <div className="space-y-4">
+                {job.updates.map((update, index) => (
+                  <div key={update.id} className="border-l-4 border-blue-500 pl-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-semibold">Week {index + 1}</p>
+                        <p className="text-sm text-gray-600">
+                          {new Date(update.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold">{update.percentComplete}%</p>
+                        <p className="text-sm text-gray-600">{update.actualHours} hrs</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

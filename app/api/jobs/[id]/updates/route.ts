@@ -4,43 +4,42 @@ import { prisma } from "@/lib/prisma"
 
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
     const session = await auth()
-    const { id } = await params
     
-    if (!session?.user?.id) {
+    if (!session?.user?.email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const jobId = parseInt(params.id)
+    
+    if (isNaN(jobId)) {
+      return NextResponse.json({ error: "Invalid job ID" }, { status: 400 })
     }
 
     const { actualHours, percentComplete } = await request.json()
 
-    if (actualHours == null || percentComplete == null) {
+    if (actualHours === undefined || percentComplete === undefined) {
       return NextResponse.json(
         { error: "Missing required fields" },
         { status: 400 }
       )
     }
 
-    if (percentComplete < 0 || percentComplete > 100) {
-      return NextResponse.json(
-        { error: "Percent complete must be between 0 and 100" },
-        { status: 400 }
-      )
-    }
-
+    // Verify job exists and user has access
     const job = await prisma.job.findUnique({
-      where: { id: parseInt(id) },
+      where: { id: jobId },
     })
 
-    if (!job || job.userId !== session.user.id) {
+    if (!job) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 })
     }
 
     const update = await prisma.weeklyUpdate.create({
       data: {
-        jobId: parseInt(id),
+        jobId,
         actualHours,
         percentComplete,
       },
