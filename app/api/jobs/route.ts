@@ -6,8 +6,21 @@ export async function POST(request: Request) {
   try {
     const session = await auth()
     
-    // TEMP: Use a hardcoded user ID if session fails (for testing)
-    const userId = session?.user?.id || "temp-user-id"
+    // Get user from database by email
+    let userId = session?.user?.id
+    
+    if (!userId && session?.user?.email) {
+      // Try to find user by email
+      const user = await prisma.user.findUnique({
+        where: { email: session.user.email }
+      })
+      userId = user?.id
+    }
+    
+    if (!userId) {
+      console.error("No user ID found. Session:", JSON.stringify(session))
+      return NextResponse.json({ error: "Unauthorized - no user ID" }, { status: 401 })
+    }
 
     const { name, estimatedHours, expectedWeeks } = await request.json()
 
