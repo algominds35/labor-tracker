@@ -10,6 +10,50 @@ export interface VarianceCalculation {
   explanation: string
 }
 
+export interface JobStats {
+  currentWeek: number
+  totalHours: number
+  percentComplete: number
+  plannedUsage: number
+  laborVariance: number
+  variancePercent: number
+  status: string
+  projectedTotal: number
+}
+
+export function calculateStats(
+  job: { estimatedHours: number; expectedWeeks: number },
+  updates: { actualHours: number; percentComplete: number }[]
+): JobStats {
+  const currentWeek = updates.length
+  const totalHours = updates.reduce((sum, u) => sum + u.actualHours, 0)
+  const percentComplete = updates.length > 0 ? updates[updates.length - 1].percentComplete : 0
+  
+  const plannedUsage = job.estimatedHours * (percentComplete / 100)
+  const laborVariance = totalHours - plannedUsage
+  const variancePercent = job.estimatedHours > 0 ? (laborVariance / job.estimatedHours) * 100 : 0
+  
+  let status = 'green'
+  if (variancePercent > 15) {
+    status = 'red'
+  } else if (variancePercent > 5) {
+    status = 'yellow'
+  }
+  
+  const projectedTotal = percentComplete > 0 ? totalHours / (percentComplete / 100) : job.estimatedHours
+  
+  return {
+    currentWeek,
+    totalHours,
+    percentComplete,
+    plannedUsage,
+    laborVariance,
+    variancePercent,
+    status,
+    projectedTotal,
+  }
+}
+
 export function calculateVariance(
   estimatedHours: number,
   actualHours: number,
